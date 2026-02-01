@@ -24,7 +24,6 @@ class ApiParams:
 @dataclass
 class AppConfig:
     json_path: str
-    sql_path: str
     api_base_url: str
     aliases: str
     api_params: ApiParams
@@ -34,7 +33,6 @@ class AppConfig:
         api_params = ApiParams.from_dict(data.get("api_params", {}))
         return cls(
             json_path=data.get("json_path", defaults.json_path),
-            sql_path=data.get("sql_path", defaults.sql_path),
             api_base_url=data.get("api_base_url", defaults.api_base_url),
             aliases=data.get("aliases", defaults.aliases),
             api_params=api_params,
@@ -43,7 +41,6 @@ class AppConfig:
     def to_dict(self) -> Dict[str, str]:
         return {
             "json_path": self.json_path,
-            "sql_path": self.sql_path,
             "api_base_url": self.api_base_url,
             "aliases": self.aliases,
             "api_params": self.api_params.to_dict(),

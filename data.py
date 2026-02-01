@@ -2,6 +2,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+from .constants import SQL_FILE_DEFAULT
+
 
 def extract_items(raw):
     if isinstance(raw, list):
@@ -117,8 +119,11 @@ def prepare_db(items):
     return conn
 
 
-def run_report(conn: sqlite3.Connection, sql_path: Path):
-    sql_text = sql_path.read_text(encoding="utf-8")
+def load_default_sql() -> str:
+    return SQL_FILE_DEFAULT.read_text(encoding="utf-8")
+
+
+def run_report(conn: sqlite3.Connection, sql_text: str):
     conn.executescript(strip_line_comments(sql_text))
     final_stmt = extract_last_statement(sql_text)
     cur = conn.execute(final_stmt)

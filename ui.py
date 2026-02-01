@@ -2,8 +2,8 @@ from pathlib import Path
 from tkinter import Tk, Toplevel, ttk, filedialog, messagebox, StringVar, font as tkfont
 
 from .api import build_query_url, fetch_json
-from .constants import API_BASE_DEFAULT, APP_TITLE, DATA_JSON_DEFAULT, SQL_FILE_DEFAULT, WINDOW_GEOMETRY, WINDOW_MIN_SIZE
-from .data import extract_items, load_items, prepare_db, run_report
+from .constants import API_BASE_DEFAULT, APP_TITLE, DATA_JSON_DEFAULT, WINDOW_GEOMETRY, WINDOW_MIN_SIZE
+from .data import extract_items, load_default_sql, load_items, prepare_db, run_report
 from .models import ApiParams, AppConfig
 from .settings import load_app_config, save_app_config
 
@@ -16,7 +16,6 @@ class ReportApp:
         self.root.minsize(*WINDOW_MIN_SIZE)
 
         self.json_path_var = StringVar(value=str(DATA_JSON_DEFAULT))
-        self.sql_path_var = StringVar(value=str(SQL_FILE_DEFAULT))
         self.api_url_var = StringVar(value=API_BASE_DEFAULT)
         self.aliases_var = StringVar(value="")
 
@@ -121,12 +120,8 @@ class ReportApp:
         ttk.Entry(top, textvariable=self.json_path_var).grid(row=0, column=1, sticky="we", padx=6)
         ttk.Button(top, text="Browse", command=self.browse_json, style="Secondary.TButton").grid(row=0, column=2, sticky="w")
 
-        ttk.Label(top, text="SQL file").grid(row=0, column=3, sticky="w", padx=(12, 0))
-        ttk.Entry(top, textvariable=self.sql_path_var).grid(row=0, column=4, sticky="we", padx=6)
-        ttk.Button(top, text="Browse", command=self.browse_sql, style="Secondary.TButton").grid(row=0, column=5, sticky="w")
-
-        ttk.Button(top, text="Обновить", command=self.refresh, style="Primary.TButton").grid(row=0, column=6, sticky="e", padx=(12, 0))
-        ttk.Button(top, text="Настройки", command=self.open_settings, style="Secondary.TButton").grid(row=0, column=7, sticky="e", padx=(8, 0))
+        ttk.Button(top, text="Обновить", command=self.refresh, style="Primary.TButton").grid(row=0, column=3, sticky="e", padx=(12, 0))
+        ttk.Button(top, text="Настройки", command=self.open_settings, style="Secondary.TButton").grid(row=0, column=4, sticky="e", padx=(8, 0))
 
         api_card = ttk.Frame(self.root, style="Card.TFrame", padding=(16, 12))
         api_card.pack(fill="x", padx=16, pady=(6, 10))
@@ -209,22 +204,16 @@ class ReportApp:
             self.json_path_var.set(path)
             self._save_settings()
 
-    def browse_sql(self):
-        path = filedialog.askopenfilename(title="Select SQL", filetypes=[("SQL", "*.sql"), ("All", "*")])
-        if path:
-            self.sql_path_var.set(path)
-            self._save_settings()
-
     def refresh(self):
         try:
             json_path = self.json_path_var.get()
-            sql_path = self.sql_path_var.get()
             if self.items_cache is None:
                 items = load_items(Path(json_path))
             else:
                 items = self.items_cache
             conn = prepare_db(items)
-            columns, rows = run_report(conn, Path(sql_path))
+            sql_text = load_default_sql()
+            columns, rows = run_report(conn, sql_text)
             conn.close()
 
             self._render_table(columns, rows)
@@ -299,14 +288,12 @@ class ReportApp:
     def _load_settings(self):
         defaults = AppConfig(
             json_path=str(DATA_JSON_DEFAULT),
-            sql_path=str(SQL_FILE_DEFAULT),
             api_base_url=API_BASE_DEFAULT,
             aliases="",
             api_params=ApiParams(),
         )
         cfg = load_app_config(defaults)
         self.json_path_var.set(cfg.json_path)
-        self.sql_path_var.set(cfg.sql_path)
         self.api_url_var.set(cfg.api_base_url)
         self.aliases_var.set(cfg.aliases)
         for key, value in cfg.api_params.to_dict().items():
@@ -316,7 +303,6 @@ class ReportApp:
     def _save_settings(self):
         config = AppConfig(
             json_path=self.json_path_var.get(),
-            sql_path=self.sql_path_var.get(),
             api_base_url=self.api_url_var.get(),
             aliases=self.aliases_var.get(),
             api_params=ApiParams.from_dict({k: v.get() for k, v in self.param_vars.items()}),
