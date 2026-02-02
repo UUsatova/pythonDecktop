@@ -16,6 +16,8 @@ def extract_items(raw):
 
 
 def load_items(path: Path):
+    if path.is_dir():
+        raise IsADirectoryError(f"JSON path is a directory: {path}")
     raw = json.loads(path.read_text(encoding="utf-8"))
     return extract_items(raw)
 

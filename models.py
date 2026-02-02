@@ -4,11 +4,9 @@ from typing import Dict
 
 @dataclass
 class ApiParams:
-    page: str = "1"
-    page_size: str = "100"
-    status: str = "active"
     amount_min: str = "500"
     amount_max: str = "500"
+    period_days_min: str = "30"
     period_days_max: str = "30"
     rating_min: str = "45"
 
@@ -26,6 +24,7 @@ class AppConfig:
     json_path: str
     api_base_url: str
     aliases: str
+    ignore_ssl: bool
     api_params: ApiParams
 
     @classmethod
@@ -35,6 +34,7 @@ class AppConfig:
             json_path=data.get("json_path", defaults.json_path),
             api_base_url=data.get("api_base_url", defaults.api_base_url),
             aliases=data.get("aliases", defaults.aliases),
+            ignore_ssl=bool(data.get("ignore_ssl", defaults.ignore_ssl)),
             api_params=api_params,
         )
 
@@ -43,5 +43,6 @@ class AppConfig:
             "json_path": self.json_path,
             "api_base_url": self.api_base_url,
             "aliases": self.aliases,
+            "ignore_ssl": self.ignore_ssl,
             "api_params": self.api_params.to_dict(),
         }

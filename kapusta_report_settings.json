@@ -1,13 +1,12 @@
 {
-  "json_path": "/home/uliana/Documents/kapusta/dev/700.json",
+  "json_path": "700.json",
   "api_base_url": "https://kapusta.by/api/internal/v1/public/loans/lend_request/",
   "aliases": "",
+  "ignore_ssl": true,
   "api_params": {
-    "page": "1",
-    "page_size": "100",
-    "status": "active",
-    "amount_min": "500",
-    "amount_max": "500",
+    "amount_min": "600",
+    "amount_max": "650",
+    "period_days_min": "0",
     "period_days_max": "30",
     "rating_min": "45"
   }

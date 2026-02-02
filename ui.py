@@ -1,8 +1,8 @@
 from pathlib import Path
-from tkinter import Tk, Toplevel, ttk, filedialog, messagebox, StringVar, font as tkfont
+from tkinter import Tk, Toplevel, ttk, filedialog, messagebox, StringVar, BooleanVar, font as tkfont
 
 from .api import build_query_url, fetch_json
-from .constants import API_BASE_DEFAULT, APP_TITLE, DATA_JSON_DEFAULT, WINDOW_GEOMETRY, WINDOW_MIN_SIZE
+from .constants import API_BASE_DEFAULT, APP_TITLE, DATA_JSON_DEFAULT, WINDOW_GEOMETRY, WINDOW_MIN_SIZE, DEFAULT_STATUS
 from .data import extract_items, load_default_sql, load_items, prepare_db, run_report
 from .models import ApiParams, AppConfig
 from .settings import load_app_config, save_app_config
@@ -18,13 +18,18 @@ class ReportApp:
         self.json_path_var = StringVar(value=str(DATA_JSON_DEFAULT))
         self.api_url_var = StringVar(value=API_BASE_DEFAULT)
         self.aliases_var = StringVar(value="")
+        self.ignore_ssl_var = BooleanVar(value=False)
+        self.calc_amount_var = StringVar(value="500")
+        self.calc_rate_var = StringVar(value="700")
+        self.calc_period_var = StringVar(value="30")
+        self.calc_income_comm_var = StringVar(value="")
+        self.calc_income_real_var = StringVar(value="")
+        self.calc_yield_real_var = StringVar(value="")
 
         self.param_vars = {
-            "page": StringVar(value="1"),
-            "page_size": StringVar(value="100"),
-            "status": StringVar(value="active"),
             "amount_min": StringVar(value="500"),
             "amount_max": StringVar(value="500"),
+            "period_days_min": StringVar(value="30"),
             "period_days_max": StringVar(value="30"),
             "rating_min": StringVar(value="45"),
         }
@@ -35,7 +40,8 @@ class ReportApp:
         self._apply_style()
         self._build_ui()
         self._load_settings()
-        self.refresh()
+        self._bind_calculator()
+        self._refresh_if_possible()
 
     def _apply_style(self):
         style = ttk.Style(self.root)
@@ -111,20 +117,61 @@ class ReportApp:
     def _build_ui(self):
         self.root.configure(background="#f3f2f4")
 
-        top = ttk.Frame(self.root, padding=(16, 12, 16, 6))
-        top.pack(fill="x")
-        top.columnconfigure(1, weight=1)
-        top.columnconfigure(4, weight=1)
+        calc_card = ttk.Frame(self.root, style="Card.TFrame", padding=(16, 12))
+        calc_card.pack(fill="x", padx=16, pady=(12, 8))
+        calc_card.columnconfigure(1, weight=1)
+        calc_card.columnconfigure(3, weight=1)
+        calc_card.columnconfigure(5, weight=1)
 
-        ttk.Label(top, text="JSON file").grid(row=0, column=0, sticky="w")
-        ttk.Entry(top, textvariable=self.json_path_var).grid(row=0, column=1, sticky="we", padx=6)
-        ttk.Button(top, text="Browse", command=self.browse_json, style="Secondary.TButton").grid(row=0, column=2, sticky="w")
+        ttk.Label(calc_card, text="Мини‑калькулятор", style="CardHeader.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Separator(calc_card, orient="horizontal").grid(row=1, column=0, columnspan=6, sticky="we", pady=(8, 10))
 
-        ttk.Button(top, text="Обновить", command=self.refresh, style="Primary.TButton").grid(row=0, column=3, sticky="e", padx=(12, 0))
-        ttk.Button(top, text="Настройки", command=self.open_settings, style="Secondary.TButton").grid(row=0, column=4, sticky="e", padx=(8, 0))
+        ttk.Label(calc_card, text="Сумма:").grid(row=2, column=0, sticky="w")
+        ttk.Entry(calc_card, textvariable=self.calc_amount_var, width=12).grid(row=2, column=1, sticky="w", padx=6)
 
-        api_card = ttk.Frame(self.root, style="Card.TFrame", padding=(16, 12))
-        api_card.pack(fill="x", padx=16, pady=(6, 10))
+        ttk.Label(calc_card, text="Процент годовых:").grid(row=2, column=2, sticky="w")
+        ttk.Entry(calc_card, textvariable=self.calc_rate_var, width=12).grid(row=2, column=3, sticky="w", padx=6)
+
+        ttk.Label(calc_card, text="Срок (дни):").grid(row=2, column=4, sticky="w")
+        ttk.Entry(calc_card, textvariable=self.calc_period_var, width=10).grid(row=2, column=5, sticky="w", padx=6)
+
+        ttk.Label(calc_card, text="Доход с комиссией:", style="Small.TLabel").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(calc_card, textvariable=self.calc_income_comm_var).grid(row=3, column=1, sticky="w", padx=6, pady=(8, 0))
+
+        ttk.Label(calc_card, text="Доход без комиссии:", style="Small.TLabel").grid(row=3, column=2, sticky="w", pady=(8, 0))
+        ttk.Label(calc_card, textvariable=self.calc_income_real_var).grid(row=3, column=3, sticky="w", padx=6, pady=(8, 0))
+
+        ttk.Label(calc_card, text="Годовая доходность (реальная):", style="Small.TLabel").grid(row=3, column=4, sticky="w", pady=(8, 0))
+        ttk.Label(calc_card, textvariable=self.calc_yield_real_var).grid(row=3, column=5, sticky="w", padx=6, pady=(8, 0))
+
+        tabs = ttk.Notebook(self.root)
+        tabs.pack(fill="x", padx=16, pady=(0, 10))
+
+        file_tab = ttk.Frame(tabs)
+        api_tab = ttk.Frame(tabs)
+        tabs.add(file_tab, text="Из файла")
+        tabs.add(api_tab, text="Из API")
+        tabs.select(api_tab)
+
+        file_card = ttk.Frame(file_tab, style="Card.TFrame", padding=(16, 12))
+        file_card.pack(fill="x", padx=2, pady=2)
+        file_card.columnconfigure(1, weight=1)
+
+        ttk.Label(file_card, text="JSON file", style="CardHeader.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Separator(file_card, orient="horizontal").grid(row=1, column=0, columnspan=3, sticky="we", pady=(8, 10))
+        ttk.Label(file_card, text="Файл JSON:").grid(row=2, column=0, sticky="w")
+        ttk.Entry(file_card, textvariable=self.json_path_var).grid(row=2, column=1, sticky="we", padx=6)
+        ttk.Button(file_card, text="Browse", command=self.browse_json, style="Secondary.TButton").grid(row=2, column=2, sticky="w")
+
+        file_actions = ttk.Frame(file_card, style="Card.TFrame")
+        file_actions.grid(row=3, column=0, columnspan=3, sticky="e", pady=(10, 0))
+        ttk.Button(file_actions, text="Обновить", command=self.refresh, style="Primary.TButton").pack(side="right")
+        ttk.Button(file_actions, text="Настройки", command=self.open_settings, style="Secondary.TButton").pack(
+            side="right", padx=(0, 8)
+        )
+
+        api_card = ttk.Frame(api_tab, style="Card.TFrame", padding=(16, 12))
+        api_card.pack(fill="x", padx=2, pady=2)
         api_card.columnconfigure(0, weight=1)
 
         ttk.Label(api_card, text="Параметры API", style="CardHeader.TLabel").grid(row=0, column=0, sticky="w")
@@ -140,45 +187,34 @@ class ReportApp:
         ttk.Label(api, text="Base URL").grid(row=0, column=0, sticky="w")
         ttk.Entry(api, textvariable=self.api_url_var).grid(row=0, column=1, columnspan=7, sticky="we", padx=6, pady=(0, 6))
 
-        ttk.Label(api, text="page:").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Entry(api, textvariable=self.param_vars["page"], width=10).grid(row=1, column=1, sticky="w", padx=6, pady=(6, 0))
+        ttk.Label(api, text="amount_min:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(api, textvariable=self.param_vars["amount_min"], width=10).grid(row=1, column=1, sticky="w", padx=6, pady=(6, 0))
 
-        ttk.Label(api, text="page_size:").grid(row=1, column=2, sticky="w", pady=(6, 0))
-        ttk.Spinbox(api, from_=1, to=1000, textvariable=self.param_vars["page_size"], width=10).grid(
-            row=1, column=3, sticky="w", padx=6, pady=(6, 0)
-        )
+        ttk.Label(api, text="amount_max:").grid(row=1, column=2, sticky="w", pady=(6, 0))
+        ttk.Entry(api, textvariable=self.param_vars["amount_max"], width=10).grid(row=1, column=3, sticky="w", padx=6, pady=(6, 0))
 
-        ttk.Label(api, text="status:").grid(row=1, column=4, sticky="w", pady=(6, 0))
-        ttk.Combobox(api, textvariable=self.param_vars["status"], values=("active", "inactive", "closed"), width=12).grid(
-            row=1, column=5, sticky="w", padx=6, pady=(6, 0)
-        )
+        ttk.Label(api, text="period_days_min:").grid(row=1, column=4, sticky="w", pady=(6, 0))
+        ttk.Entry(api, textvariable=self.param_vars["period_days_min"], width=12).grid(row=1, column=5, sticky="w", padx=6, pady=(6, 0))
 
-        ttk.Label(api, text="amount_min:").grid(row=2, column=0, sticky="w", pady=(6, 0))
-        ttk.Entry(api, textvariable=self.param_vars["amount_min"], width=10).grid(row=2, column=1, sticky="w", padx=6, pady=(6, 0))
+        ttk.Label(api, text="period_days_max:").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(api, textvariable=self.param_vars["period_days_max"], width=12).grid(row=2, column=1, sticky="w", padx=6, pady=(6, 0))
 
-        ttk.Label(api, text="amount_max:").grid(row=2, column=2, sticky="w", pady=(6, 0))
-        ttk.Entry(api, textvariable=self.param_vars["amount_max"], width=10).grid(row=2, column=3, sticky="w", padx=6, pady=(6, 0))
+        ttk.Label(api, text="rating_min:").grid(row=2, column=2, sticky="w", pady=(6, 0))
+        ttk.Entry(api, textvariable=self.param_vars["rating_min"], width=8).grid(row=2, column=3, sticky="w", padx=6, pady=(6, 0))
 
-        ttk.Label(api, text="period_days_max:").grid(row=2, column=4, sticky="w", pady=(6, 0))
-        ttk.Entry(api, textvariable=self.param_vars["period_days_max"], width=12).grid(row=2, column=5, sticky="w", padx=6, pady=(6, 0))
-
-        ttk.Label(api, text="rating_min:").grid(row=2, column=6, sticky="w", pady=(6, 0))
-        ttk.Entry(api, textvariable=self.param_vars["rating_min"], width=8).grid(row=2, column=7, sticky="w", padx=6, pady=(6, 0))
+        ttk.Checkbutton(api, text="Ignore SSL", variable=self.ignore_ssl_var).grid(row=2, column=4, sticky="w", pady=(6, 0))
 
         actions = ttk.Frame(api_card, style="Card.TFrame")
         actions.grid(row=3, column=0, sticky="we", pady=(12, 0))
         actions.columnconfigure(0, weight=1)
 
-        ttk.Button(actions, text="Загрузить данные", command=self.fetch_only, style="Blue.TButton").grid(
-            row=0, column=0, sticky="w"
-        )
         right_actions = ttk.Frame(actions, style="Card.TFrame")
         right_actions.grid(row=0, column=1, sticky="e")
-        ttk.Button(right_actions, text="Загрузить данные", command=self.fetch_only, style="Blue.TButton").pack(
-            side="left", padx=(0, 10)
-        )
         ttk.Button(right_actions, text="Загрузить обновить", command=self.fetch_and_refresh, style="Primary.TButton").pack(
             side="left"
+        )
+        ttk.Button(right_actions, text="Настройки", command=self.open_settings, style="Secondary.TButton").pack(
+            side="left", padx=(10, 0)
         )
 
         table_card = ttk.Frame(self.root, style="Card.TFrame", padding=(8, 8, 8, 10))
@@ -208,7 +244,11 @@ class ReportApp:
         try:
             json_path = self.json_path_var.get()
             if self.items_cache is None:
-                items = load_items(Path(json_path))
+                path = Path(json_path)
+                if not path.exists():
+                    self.status_var.set("Файл JSON не найден. Выберите файл или загрузите из API.")
+                    return
+                items = load_items(path)
             else:
                 items = self.items_cache
             conn = prepare_db(items)
@@ -223,28 +263,68 @@ class ReportApp:
 
     def fetch_and_refresh(self):
         try:
-            base_url = self.api_url_var.get().strip()
-            params = {k: v.get().strip() for k, v in self.param_vars.items()}
-            url = build_query_url(base_url, params)
-            raw = fetch_json(url)
-            self.items_cache = extract_items(raw)
+            self.items_cache = self._fetch_all_pages()
             self._save_settings()
             self.refresh()
             self.status_var.set(f"Fetched rows: {len(self.items_cache)}")
         except Exception as exc:
             messagebox.showerror("Error", str(exc))
 
-    def fetch_only(self):
+    def _fetch_all_pages(self):
+        base_url = self.api_url_var.get().strip()
+        params = {k: v.get().strip() for k, v in self.param_vars.items()}
+        all_items = []
+        page = 1
+        page_size = 100
+        while True:
+            params_with_page = dict(params)
+            params_with_page.setdefault("status", DEFAULT_STATUS)
+            params_with_page["page"] = str(page)
+            params_with_page["page_size"] = str(page_size)
+            url = build_query_url(base_url, params_with_page)
+            raw = fetch_json(url, verify_ssl=not self.ignore_ssl_var.get())
+            items = extract_items(raw)
+            if not items:
+                break
+            all_items.extend(items)
+            if len(items) < page_size:
+                break
+            page += 1
+            if page > 1000:
+                break
+        return all_items
+
+    def _bind_calculator(self):
+        self.calc_amount_var.trace_add("write", lambda *_: self._update_calculator())
+        self.calc_rate_var.trace_add("write", lambda *_: self._update_calculator())
+        self.calc_period_var.trace_add("write", lambda *_: self._update_calculator())
+        self._update_calculator()
+
+    def _parse_float(self, value: str):
         try:
-            base_url = self.api_url_var.get().strip()
-            params = {k: v.get().strip() for k, v in self.param_vars.items()}
-            url = build_query_url(base_url, params)
-            raw = fetch_json(url)
-            self.items_cache = extract_items(raw)
-            self._save_settings()
-            self.status_var.set(f"Fetched rows: {len(self.items_cache)}")
-        except Exception as exc:
-            messagebox.showerror("Error", str(exc))
+            return float(value.replace(",", "."))
+        except ValueError:
+            return None
+
+    def _update_calculator(self):
+        amount = self._parse_float(self.calc_amount_var.get())
+        rate = self._parse_float(self.calc_rate_var.get())
+        period = self._parse_float(self.calc_period_var.get())
+
+        if amount is None or rate is None or period is None or period == 0:
+            self.calc_income_comm_var.set("—")
+            self.calc_income_real_var.set("—")
+            self.calc_yield_real_var.set("—")
+            return
+
+        percent_amount = amount * (rate / 100.0) * (period / 365.0)
+        income_with_comm = amount + percent_amount
+        income_without_comm = income_with_comm * 0.955
+        real_yield = ((income_without_comm - amount) / amount) * (365.0 / period) * 100.0
+
+        self.calc_income_comm_var.set(f"{income_with_comm:.2f}")
+        self.calc_income_real_var.set(f"{income_without_comm:.2f}")
+        self.calc_yield_real_var.set(f"{real_yield:.2f}%")
 
     def _render_table(self, columns, rows):
         self.tree.delete(*self.tree.get_children())
@@ -290,21 +370,34 @@ class ReportApp:
             json_path=str(DATA_JSON_DEFAULT),
             api_base_url=API_BASE_DEFAULT,
             aliases="",
+            ignore_ssl=False,
             api_params=ApiParams(),
         )
         cfg = load_app_config(defaults)
-        self.json_path_var.set(cfg.json_path)
+        json_path = cfg.json_path
+        if Path(json_path).is_dir():
+            json_path = str(DATA_JSON_DEFAULT)
+        self.json_path_var.set(json_path)
         self.api_url_var.set(cfg.api_base_url)
         self.aliases_var.set(cfg.aliases)
+        self.ignore_ssl_var.set(cfg.ignore_ssl)
         for key, value in cfg.api_params.to_dict().items():
             if key in self.param_vars:
                 self.param_vars[key].set(value)
+
+    def _refresh_if_possible(self):
+        json_path = Path(self.json_path_var.get())
+        if json_path.exists() or self.items_cache is not None:
+            self.refresh()
+        else:
+            self.status_var.set("Выберите файл JSON или загрузите данные из API.")
 
     def _save_settings(self):
         config = AppConfig(
             json_path=self.json_path_var.get(),
             api_base_url=self.api_url_var.get(),
             aliases=self.aliases_var.get(),
+            ignore_ssl=self.ignore_ssl_var.get(),
             api_params=ApiParams.from_dict({k: v.get() for k, v in self.param_vars.items()}),
         )
         save_app_config(config)
